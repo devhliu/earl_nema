@@ -5,7 +5,9 @@ The  aim of this project is to automate the calculation of the necessary quantit
 ## Dependencies
 
 -pydicom: `pip install pydicom`
+
 -skimage: `pip install scikit-image`
+
 -pandas: `pip install pandas`
 
                                    
