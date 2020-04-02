@@ -147,6 +147,8 @@ def calc_RCs(pet_scan, blobs, dz, dy, dx, S0, t, RC_max_lims, RC_mean_lims):
     mean_pixels = []
     VOI_sizes = []
     sphere_radii = []
+    
+    xy_locs = []
     # Loop through each blob
     for blob in blobs:
         # Collect location and size of current blob
@@ -168,15 +170,30 @@ def calc_RCs(pet_scan, blobs, dz, dy, dx, S0, t, RC_max_lims, RC_mean_lims):
         # Calculate the mean pixel value (in kBq/mL) in this VOI
         mean_pix = np.mean(VOI) / 1000
         mean_pixels.append(mean_pix)
-        # Save number of pixels to insure we evaluate the spheres in the correct order
-        VOI_sizes.append(len(VOI))
-
+        # Save locations to place spheres in the correct order
+        xy_locs.append([x0,y0])
+        
     max_pixels = np.array(max_pixels)
     mean_pixels = np.array(mean_pixels)
-    VOI_sizes = np.array(VOI_sizes)
-    sphere_radii = np.array(sphere_radii)
-    # Place data in decending order of sphere size
-    order = np.argsort(-VOI_sizes)
+    sphere_radii = np.array(sphere_radii)  
+    xy_locs = np.array(xy_locs)
+    
+    # Place correct order based on sphere locations
+    order = np.zeros((6,))
+    xy_half = np.array(pet_scan.shape)[1:]/2
+    spheres_03 = np.argsort(np.abs(xy_locs[:,1]-xy_half[1]))[:2]
+    order[0] = spheres_03[np.argmax(xy_locs[spheres_03,0])]
+    order[3] = spheres_03[np.argmin(xy_locs[spheres_03,0])]
+    spheres_12 = np.where(xy_locs[:,1]>xy_half[1])[0]
+    spheres_12 = [loc for loc in spheres_12 if loc not in spheres_03]
+    order[1] = spheres_12[np.argmax(xy_locs[spheres_12,0])]
+    order[2] = spheres_12[np.argmin(xy_locs[spheres_12,0])]
+    spheres_45 = np.where(xy_locs[:,1]<xy_half[1])[0]
+    spheres_45 = [loc for loc in spheres_45 if loc not in spheres_03]
+    order[4] = spheres_45[np.argmin(xy_locs[spheres_45,0])]
+    order[5] = spheres_45[np.argmax(xy_locs[spheres_45,0])]
+    order = order.astype(int)
+    #order = np.argsort(-VOI_sizes)
     max_pixels = max_pixels[order]
     mean_pixels = mean_pixels[order]
     sphere_radii = sphere_radii[order]
