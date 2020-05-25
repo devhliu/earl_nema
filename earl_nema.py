@@ -348,7 +348,7 @@ class NemaRC:
         for a in ax:
             a.set_xlabel(r'Sphere Diameter (mm)', fontsize=15)
             a.tick_params(labelsize=12)
-            a.legend(loc='upper left', fontsize=14, fancybox=True, framealpha=0.8)
+            a.legend(loc='lower right', fontsize=14, fancybox=True, framealpha=0.8)
             a.grid(alpha=0.7)
         plt.tight_layout()
         plt.subplots_adjust(wspace=0.3, top=0.88)
