@@ -2,6 +2,7 @@ import numpy as np
 import glob
 import matplotlib.pyplot as plt
 import pydicom
+from pydicom.tag import Tag
 from skimage.feature import blob_dog
 import pandas as pd 
 
@@ -128,7 +129,7 @@ def FDG_activity(S0, t, lam=0.0063152315):
     '''
     return S0 * np.exp(-lam*t) # kBq/mL
 
-def calc_RCs(pet_scan, blobs, dz, dy, dx, S0, t, RC_max_lims, RC_mean_lims):
+def calc_RCs(pet_scan, blobs, dz, dy, dx, S0, B0, t, RC_max_lims, RC_mean_lims):
     '''Calculate the recovery coefficients.
 
     Parameters:
@@ -162,13 +163,23 @@ def calc_RCs(pet_scan, blobs, dz, dy, dx, S0, t, RC_max_lims, RC_mean_lims):
         mask = create_boolean_ellipsoid(pet_scan, z0, y0, x0, rz, ry, rx)
         # Investigate only the pixels within this blob
         pet_segment = pet_scan[mask]    
+       
+        print(pet_scan.dtype)
+        print(pet_segment.dtype)
+       
         # Calculate maximum pixel value in kBq/mL
         max_pix = np.max(pet_segment) / 1000
         max_pixels.append(max_pix)
-        # Find the VOI based on the half max
-        VOI = pet_segment[pet_segment>max_pix*1000/2]
+        
+        # # Find the VOI based on the half max
+        # VOI = pet_segment[pet_segment>max_pix*1000/2]
+
+        # Segment VOI using adapted background method: VOI A50 = (SUVmax-Background)*0.5+Background
+        A50 = ((max_pix-B0)*0.5+B0)*1000 #isocontour at 50% SUV max, adapted for background
+        VOI_A50 = pet_segment[pet_segment>A50]
+
         # Calculate the mean pixel value (in kBq/mL) in this VOI
-        mean_pix = np.mean(VOI) / 1000
+        mean_pix = np.mean(VOI_A50) / 1000
         mean_pixels.append(mean_pix)
         # Save locations to place spheres in the correct order
         xy_locs.append([x0,y0])
@@ -256,6 +267,7 @@ def calc_COV(pet_scan, spheres, dz, dy, dx):
                        spheres['Z_loc (pixels)'][1],
                        spheres['Z_loc (pixels)'][1]+1]).astype(int)
     COVs = []
+    bkg = [] #background activity of each ROI
     # Loop through the 3 slices
     for z in ROI_z:
         pet_slice = np.copy(pet_scan[z])
@@ -265,27 +277,32 @@ def calc_COV(pet_scan, spheres, dz, dy, dx):
             ROI = pet_slice[mask] 
             # Calculate COV for this ROI
             COVs.append(np.std(ROI)/np.mean(ROI))
+            bkg.append(np.mean(ROI))
     # Calculate average COV
     COV = np.mean(COVs)
+    COV_error = np.std(COVs)
+    bkg_mean = np.mean(bkg)
     
-    return COV, ROI_z, ROI_y, ROI_x, ROI_sidelen
+    return COV, ROI_z, ROI_y, ROI_x, ROI_sidelen, COV_error
     
 class NemaRC:
     '''EANM analysis of a PET scan.
 
     Parameters:
     dicom_dir (str): Path to dicom files.
-    S0 (float): Original activity (in kBq/mL) at t=0.
+    S0 (float): Original activity concentration in spheres (in kBq/mL) at t=0.
+    B0 (float): Original activity concentration in background (in kBq/mL) at t=0.
     t (float): Time elapsed (in minutes) since S0 was measured.
     threshold (float, optional): The absolute lower bound for scale space maxima. Local maxima 
                                     smaller than thresh are ignored. Reduce this to detect 
-                                    blobs with less intensities.
+                                    blobs with less intensities. Don't reduce below 0.085.
     sigma_ratio (float, optional): The ratio between the standard deviation of Gaussian Kernels 
                                     used for computing the Difference of Gaussians.
     '''
-    def __init__(self, dicom_dir, S0, t, threshold=0.1, sigma_ratio=1.45):
-        self.S0 = dicom_dir
+    def __init__(self, dicom_dir, S0, B0, t, threshold=0.1, sigma_ratio=1.45):
+        #self.S0 = dicom_dir
         self.S0 = S0
+        self.B0 = B0
         self.t = t
 
         # Load PET data
@@ -303,11 +320,31 @@ class NemaRC:
         self.RC_mean_lims = np.array([[0.76,0.89],[0.72,0.85],[0.63,0.78],
                                 [0.57,0.73],[0.44,0.60],[0.27,0.38]])
         self.spheres, self.S_true = calc_RCs(self.pet_scan, self.blobs, self.dz, self.dy, self.dx, 
-                                             self.S0, self.t, self.RC_max_lims, self.RC_mean_lims)
+                                             self.S0, self.B0, self.t, self.RC_max_lims, self.RC_mean_lims)
         
+        self.RC_mean = self.spheres['RC_mean']
+        self.RC_max = self.spheres['RC_max']
+        # Calculate mean contrast recovery (MCR) for SUV mean and SUV max
+        self.MCR_mean = np.mean(self.spheres['RC_mean'])
+        self.MCR_max = np.mean(self.spheres['RC_max'])
+        
+        # Calculate curvature of RC curves (RC Mean and RC Max)
+        i = 1
+        mean_rmse = []
+        max_rmse = []
+        while i<6:
+            mean_error = (self.RC_mean[0]-self.RC_mean[i])**2
+            max_error = (self.RC_max[0]-self.RC_max[i])**2
+            mean_rmse.append(mean_error)
+            max_rmse.append(max_error)
+            i+=1
+        self.mean_curv = np.sqrt(np.mean(mean_rmse))
+        self.max_curv = np.sqrt(np.mean(max_rmse))
+
+
         # Calculate coefficient of variation
         print('Calculating coefficient of variation...')
-        self.COV, self.ROI_z, self.ROI_y, self.ROI_x, self.ROI_sidelen = calc_COV(self.pet_scan, self.spheres, 
+        self.COV, self.ROI_z, self.ROI_y, self.ROI_x, self.ROI_sidelen, self.COV_error = calc_COV(self.pet_scan, self.spheres, 
                                                                             self.dz, self.dy, self.dx)
         print('Procedure complete.')
         
