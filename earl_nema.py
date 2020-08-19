@@ -164,9 +164,6 @@ def calc_RCs(pet_scan, blobs, dz, dy, dx, S0, B0, t, RC_max_lims, RC_mean_lims):
         # Investigate only the pixels within this blob
         pet_segment = pet_scan[mask]    
        
-        print(pet_scan.dtype)
-        print(pet_segment.dtype)
-       
         # Calculate maximum pixel value in kBq/mL
         max_pix = np.max(pet_segment) / 1000
         max_pixels.append(max_pix)

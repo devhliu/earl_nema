@@ -103,3 +103,54 @@ class NemaPlots():
         plt.title(self.title + ' Background COV',fontsize=16)
         plt.show()
     
+    def noise(self):
+        cov = []
+        for RC in self.RCs:
+            cov.append(RC.COV)
+
+        return cov
+    
+    def bias(self): #1 - SUV mean Mean contrast recovery 
+        mcr_bias = []
+        for RC in self.RCs:
+            mcr_bias.append(1-RC.MCR_mean)
+
+        return mcr_bias
+
+    # Noise vs Bias plots
+
+    def cov_v_mcr(self): #nvb = CoV (noise) vs MCR (average SUV mean bias of all 6 spheres)
+
+        cov = []
+        mcr_bias = []
+        for RC in self.RCs:
+            cov.append(RC.COV)
+            mcr_bias.append(1-RC.MCR_mean)
+
+        sns.set_style("white")
+        plt.figure(figsize=(8,7))
+
+        plt.plot(cov,mcr_bias)
+
+        plt.xlabel('Noise (COV)',fontsize=16)
+        plt.ylabel('Bias (SUV mean)',fontsize=16)
+        plt.title(self.title + ' MCR bias vs COV',fontsize=16)
+        plt.show()
+
+    def cov_v_max_mcr(self):
+
+        cov = []
+        mcr_bias = []
+        for RC in self.RCs:
+            cov.append(RC.COV)
+            mcr_bias.append(1-RC.MCR_max)
+
+        sns.set_style("white")
+        plt.figure(figsize=(8,7))
+
+        plt.plot(cov,mcr_bias)
+
+        plt.xlabel('Noise (COV)',fontsize=16)
+        plt.ylabel('Bias (SUV max)',fontsize=16)
+        plt.title(self.title + ' MCR max bias vs COV',fontsize=16)
+        plt.show()
