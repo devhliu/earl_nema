@@ -129,8 +129,8 @@ def FDG_activity(S0, t, lam=0.0063152315):
     '''
     return S0 * np.exp(-lam*t) # kBq/mL
 
-def calc_RCs(pet_scan, blobs, dz, dy, dx, S0, B0, t, RC_max_lims, RC_mean_lims):
-    '''Calculate the recovery coefficients.
+def voi_segment(pet_scan, blobs, dz, dy, dx, S0, t, RC_max_lims, RC_mean_lims):
+    '''Identify positions of VOIs used to calculate the recovery coefficients.
 
     Parameters:
     pet_scan (numpy array): 3D PET scan.
@@ -141,7 +141,7 @@ def calc_RCs(pet_scan, blobs, dz, dy, dx, S0, B0, t, RC_max_lims, RC_mean_lims):
     t (float): Time elapsed (in minutes) since S0 was measured.
 
     Returns:
-    spheres (pandas DataFram): Summary of information on each sphere including recovery coefficients.
+    spheres (pandas DataFrame): Summary of information on each sphere including recovery coefficients.
     '''
     # Determine the values needed for the calculation of the recovery coefficients
     max_pixels = []
@@ -162,21 +162,21 @@ def calc_RCs(pet_scan, blobs, dz, dy, dx, S0, B0, t, RC_max_lims, RC_mean_lims):
         # Create mask based on location and size of blob
         mask = create_boolean_ellipsoid(pet_scan, z0, y0, x0, rz, ry, rx)
         # Investigate only the pixels within this blob
-        pet_segment = pet_scan[mask]    
+        pet_segment = pet_scan[mask] / 1000 #convert from Bq to kBq   
        
         # Calculate maximum pixel value in kBq/mL
-        max_pix = np.max(pet_segment) / 1000
+        max_pix = np.max(pet_segment) 
         max_pixels.append(max_pix)
         
         # # Find the VOI based on the half max
         # VOI = pet_segment[pet_segment>max_pix*1000/2]
 
         # Segment VOI using adapted background method: VOI A50 = (SUVmax-Background)*0.5+Background
-        A50 = ((max_pix-B0)*0.5+B0)*1000 #isocontour at 50% SUV max, adapted for background
+        A50 = ((max_pix-2.0)*0.5+2.0) #This line is a placeholder, not necessary due to calc_RCs function below
         VOI_A50 = pet_segment[pet_segment>A50]
 
         # Calculate the mean pixel value (in kBq/mL) in this VOI
-        mean_pix = np.mean(VOI_A50) / 1000
+        mean_pix = np.mean(VOI_A50)
         mean_pixels.append(mean_pix)
         # Save locations to place spheres in the correct order
         xy_locs.append([x0,y0])
@@ -235,7 +235,7 @@ def calc_RCs(pet_scan, blobs, dz, dy, dx, S0, B0, t, RC_max_lims, RC_mean_lims):
     spheres['RC_max EARL Compatible'] = spheres['RC_max EARL Compatible'].astype(bool)
     spheres['RC_mean EARL Compatible'] = spheres['RC_mean EARL Compatible'].astype(bool)
     
-    return spheres, S_true
+    return spheres, order
 
 def calc_COV(pet_scan, spheres, dz, dy, dx):
     '''Calculate the coefficient of variation for the scan.
@@ -278,17 +278,108 @@ def calc_COV(pet_scan, spheres, dz, dy, dx):
     # Calculate average COV
     COV = np.mean(COVs)
     COV_error = np.std(COVs)
-    bkg_mean = np.mean(bkg)
+    bkg_mean = np.mean(bkg)/1000 #Background activity concentration in kBq/mL
     
-    return COV, ROI_z, ROI_y, ROI_x, ROI_sidelen, COV_error
+    return COV, ROI_z, ROI_y, ROI_x, ROI_sidelen, COV_error, bkg_mean
     
+def calc_RCs(pet_scan, blobs, dz, dy, dx, S0, B0, t, order, RC_max_lims, RC_mean_lims):
+    '''Calculate the recovery coefficients.
+
+    Parameters:
+    pet_scan (numpy array): 3D PET scan.
+    blobs (numpy array): A 2d array with each row representing 3 coordinate values (z, y, x) 
+                            and the radii of the ellipsoid in each direction (rz, ry, rx).
+    dz, dy, dx (floats): resolution of the PET scan.
+    S0 (float): Original activity (in kBq/mL) at t=0.
+    t (float): Time elapsed (in minutes) since S0 was measured.
+
+    Returns:
+    spheres (pandas DataFrame): Summary of information on each sphere including recovery coefficients.
+    '''
+    # Determine the values needed for the calculation of the recovery coefficients
+    max_pixels = []
+    mean_pixels = []
+    VOI_sizes = []
+    sphere_radii = []
+    
+    xy_locs = []
+    # Loop through each blob
+    for blob in blobs:
+        # Collect location and size of current blob
+        z0, y0, x0, rz, ry, rx = np.rint(blob).astype(int)
+        sphere_radii.append(np.mean([rz*dz, ry*dy, rx*dx]))
+        # Add two pixels to radii to insure we collect the entire sphere
+        rz += 2
+        ry += 2
+        rx += 2
+        # Create mask based on location and size of blob
+        mask = create_boolean_ellipsoid(pet_scan, z0, y0, x0, rz, ry, rx)
+        # Investigate only the pixels within this blob
+        pet_segment = pet_scan[mask] / 1000 #convert from Bq to kBq   
+       
+        # Calculate maximum pixel value in kBq/mL
+        max_pix = np.max(pet_segment) 
+        max_pixels.append(max_pix)
+        
+        # # Find the VOI based on the half max
+        # VOI = pet_segment[pet_segment>max_pix*1000/2]
+
+        # Segment VOI using adapted background method: VOI A50 = (SUVmax-Background)*0.5+Background
+        A50 = ((max_pix-B0)*0.5+B0) #isocontour at 50% SUV max, adapted for background
+        VOI_A50 = pet_segment[pet_segment>A50]
+
+        # Calculate the mean pixel value (in kBq/mL) in this VOI
+        mean_pix = np.mean(VOI_A50)
+        mean_pixels.append(mean_pix)
+        # Save locations to place spheres in the correct order
+        xy_locs.append([x0,y0])
+        
+    max_pixels = np.array(max_pixels)
+    mean_pixels = np.array(mean_pixels)
+    sphere_radii = np.array(sphere_radii)  
+    xy_locs = np.array(xy_locs)
+
+    max_pixels = max_pixels[order]
+    mean_pixels = mean_pixels[order]
+    sphere_radii = sphere_radii[order]
+    locations = blobs[order,:3]
+
+    # Calculate current activity
+    S_true = FDG_activity(S0, t) # kBq/mL
+
+    # Calculate recovery coefficients
+    RC_max = max_pixels/S_true
+    RC_mean = mean_pixels/S_true
+    
+    # Check if within EARL ranges
+    RC_max_EARL = []
+    for min_max, RC in zip(RC_max_lims, RC_max):
+        RC_max_EARL.append(((RC>=min_max[0])&(RC<=min_max[1])))
+    RC_max_EARL = np.array(RC_max_EARL)
+    RC_mean_EARL = []
+    for min_max, RC in zip(RC_mean_lims, RC_mean):
+        RC_mean_EARL.append(((RC>=min_max[0])&(RC<=min_max[1])))
+    RC_mean_EARL = np.array(RC_mean_EARL)
+
+    # Save data into pandas DataFrame
+    data = np.hstack((np.expand_dims(sphere_radii, 1), locations, 
+                      np.expand_dims(max_pixels, 1), np.expand_dims(mean_pixels, 1),
+                      np.expand_dims(RC_max, 1), np.expand_dims(RC_max_EARL, 1),
+                      np.expand_dims(RC_mean, 1), np.expand_dims(RC_mean_EARL, 1)))  
+    results = pd.DataFrame(data, columns = ['"Blob" Radius (mm)', 'Z_loc (pixels)', 'Y_loc (pixels)', 
+                                            'X_loc (pixels)', 'S_max (kBq/mL)', 'S_mean (kBq/mL)', 
+                                            'RC_max', 'RC_max EARL Compatible', 'RC_mean', 'RC_mean EARL Compatible'])
+    results['RC_max EARL Compatible'] = results['RC_max EARL Compatible'].astype(bool)
+    results['RC_mean EARL Compatible'] = results['RC_mean EARL Compatible'].astype(bool)
+    
+    return results
+
 class NemaRC:
     '''EANM analysis of a PET scan.
 
     Parameters:
     dicom_dir (str): Path to dicom files.
     S0 (float): Original activity concentration in spheres (in kBq/mL) at t=0.
-    B0 (float): Original activity concentration in background (in kBq/mL) at t=0.
     t (float): Time elapsed (in minutes) since S0 was measured.
     threshold (float, optional): The absolute lower bound for scale space maxima. Local maxima 
                                     smaller than thresh are ignored. Reduce this to detect 
@@ -296,10 +387,9 @@ class NemaRC:
     sigma_ratio (float, optional): The ratio between the standard deviation of Gaussian Kernels 
                                     used for computing the Difference of Gaussians.
     '''
-    def __init__(self, dicom_dir, S0, B0, t, threshold=0.1, sigma_ratio=1.45):
+    def __init__(self, dicom_dir, S0, t, threshold=0.085, sigma_ratio=1.45):
         #self.S0 = dicom_dir
         self.S0 = S0
-        self.B0 = B0
         self.t = t
 
         # Load PET data
@@ -309,21 +399,32 @@ class NemaRC:
         print('Locating spheres using the Difference of Gaussian (DoG) method...')
         self.blobs = find_spheres(self.pet_scan, self.dz, self.dy, self.dx, threshold, sigma_ratio)
 
-        # Calculate recovery coefficients
-        print('Calculating recovery coefficients for each sphere...')
-        # Limits of accepted range
+        # Segment VOIs for spheres (will also be used for positioning COV ROIs)
+        print('Segmenting VOI for each sphere...')
+        # EARL 1 RC range
         self.RC_max_lims = np.array([[0.95,1.16],[0.91,1.13],[0.83,1.09],
                                 [0.73,1.01],[0.59,0.85],[0.31,0.49]])
         self.RC_mean_lims = np.array([[0.76,0.89],[0.72,0.85],[0.63,0.78],
                                 [0.57,0.73],[0.44,0.60],[0.27,0.38]])
-        self.spheres, self.S_true = calc_RCs(self.pet_scan, self.blobs, self.dz, self.dy, self.dx, 
-                                             self.S0, self.B0, self.t, self.RC_max_lims, self.RC_mean_lims)
+        self.spheres, self.order = voi_segment(self.pet_scan, self.blobs, self.dz, self.dy, self.dx, 
+                                             self.S0, self.t, self.RC_max_lims, self.RC_mean_lims)
         
-        self.RC_mean = self.spheres['RC_mean']
-        self.RC_max = self.spheres['RC_max']
+
+        # Calculate coefficient of variation
+        print('Calculating coefficient of variation...')
+        self.COV, self.ROI_z, self.ROI_y, self.ROI_x, self.ROI_sidelen, self.COV_error, self.bkg = calc_COV(self.pet_scan, self.spheres, 
+                                                                            self.dz, self.dy, self.dx)
+        
+        # Calculate recovery coefficients
+        print('Calculating recovery coefficients for each sphere...')
+        self.results = calc_RCs(self.pet_scan, self.blobs, self.dz, self.dy, self.dx, 
+                        self.S0, self.bkg, self.t, self.order, self.RC_max_lims, self.RC_mean_lims)
+
+        self.RC_mean = self.results['RC_mean']
+        self.RC_max = self.results['RC_max']
         # Calculate mean contrast recovery (MCR) for SUV mean and SUV max
-        self.MCR_mean = np.mean(self.spheres['RC_mean'])
-        self.MCR_max = np.mean(self.spheres['RC_max'])
+        self.MCR_mean = np.mean(self.results['RC_mean'])
+        self.MCR_max = np.mean(self.results['RC_max'])
         
         # Calculate curvature of RC curves (RC Mean and RC Max)
         i = 1
@@ -338,13 +439,9 @@ class NemaRC:
         self.mean_curv = np.sqrt(np.mean(mean_rmse))
         self.max_curv = np.sqrt(np.mean(max_rmse))
 
-
-        # Calculate coefficient of variation
-        print('Calculating coefficient of variation...')
-        self.COV, self.ROI_z, self.ROI_y, self.ROI_x, self.ROI_sidelen, self.COV_error = calc_COV(self.pet_scan, self.spheres, 
-                                                                            self.dz, self.dy, self.dx)
         print('Procedure complete.')
-        
+
+
     def plot_spheres(self):
         # Plot
         fig, axes = plt.subplots(1, 2, figsize=(8, 4))

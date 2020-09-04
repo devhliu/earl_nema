@@ -39,6 +39,8 @@ class NemaPlots():
 
         self.spheres = np.array([37, 28, 22, 17, 13, 10])
 
+        sns.set_palette("husl")
+
         
 
     def RCmean(self):
@@ -97,6 +99,8 @@ class NemaPlots():
         for RC,recon,x in zip(self.RCs,self.recons,xaxis):
             plt.errorbar(x,RC.COV,yerr=RC.COV_error, marker='o',label=recon)
 
+        threshold = [0.15,0.15,0.15,0.15,0.15,0.15]
+        plt.plot(xaxis,threshold,linestyle = 'dashed',color='gray',label='limit')
         plt.ylabel('COV',fontsize=16)
         plt.xlabel(axis_title,fontsize=16)
         plt.legend(fontsize = 12)
@@ -106,16 +110,24 @@ class NemaPlots():
     def noise(self):
         cov = []
         for RC in self.RCs:
-            cov.append(RC.COV)
+            cov.append(RC.COV*100)
 
         return cov
     
     def bias(self): #1 - SUV mean Mean contrast recovery 
         mcr_bias = []
         for RC in self.RCs:
-            mcr_bias.append(1-RC.MCR_mean)
-
+            #mcr_bias.append(np.abs(1-RC.MCR_mean)*100)
+            mcr_bias.append((RC.MCR_mean-1)*100)
         return mcr_bias
+
+    def max_bias(self): #1 - SUV mean Mean contrast recovery 
+        mcr_max_bias = []
+        for RC in self.RCs:
+            #mcr_max_bias.append(np.abs(1-RC.MCR_max)*100)
+            mcr_max_bias.append((RC.MCR_max-1)*100)
+
+        return mcr_max_bias
 
     # Noise vs Bias plots
 
@@ -125,15 +137,15 @@ class NemaPlots():
         mcr_bias = []
         for RC in self.RCs:
             cov.append(RC.COV)
-            mcr_bias.append(1-RC.MCR_mean)
+            mcr_bias.append(np.abs(1-RC.MCR_mean))
 
         sns.set_style("white")
         plt.figure(figsize=(8,7))
 
         plt.plot(cov,mcr_bias)
 
-        plt.xlabel('Noise (COV)',fontsize=16)
-        plt.ylabel('Bias (SUV mean)',fontsize=16)
+        plt.xlabel(r'Noise (\% COV)',fontsize=16)
+        plt.ylabel(r'Bias (mean \% recovery)',fontsize=16)
         plt.title(self.title + ' MCR bias vs COV',fontsize=16)
         plt.show()
 
@@ -154,3 +166,22 @@ class NemaPlots():
         plt.ylabel('Bias (SUV max)',fontsize=16)
         plt.title(self.title + ' MCR max bias vs COV',fontsize=16)
         plt.show()
+
+    def cov_time(self):
+
+        cov_time = []
+        scan_duration = [19,38,75,150,300,600]
+        for RC in self.RCs:
+            cov_time.append(RC.COV)
+
+
+        sns.set_style("white")
+        plt.figure(figsize=(8,7))
+
+        plt.plot(cov_time,scan_duration)
+
+        plt.xlabel('Scan Duration (s)',fontsize=16)
+        plt.ylabel('COV',fontsize=16)
+        plt.title(self.title + ' MCR max bias vs COV',fontsize=16)
+        plt.show()
+        return cov_time
